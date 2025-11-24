@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { OpenAPIV3 } from 'openapi-types'
 import { MCPProxy } from '../src/mcp/proxy'
+import { MCPServerConfig } from '../src/client/mcp-client'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import OpenAPISchemaValidator from 'openapi-schema-validator'
 import axios from 'axios'
@@ -52,6 +53,36 @@ export async function loadOpenApiSpec(specPath: string): Promise<OpenAPIV3.Docum
   }
 }
 
+// Load external MCP server configurations from environment variable
+function loadExternalMcpServers(): MCPServerConfig[] | undefined {
+  const envVar = process.env.EXTERNAL_MCP_SERVERS
+  if (!envVar) {
+    return undefined
+  }
+
+  try {
+    const configs = JSON.parse(envVar)
+    if (!Array.isArray(configs)) {
+      console.warn('EXTERNAL_MCP_SERVERS must be a JSON array')
+      return undefined
+    }
+
+    // Validate each config
+    for (const config of configs) {
+      if (!config.name || !config.command) {
+        console.warn('Each external MCP server config must have "name" and "command" fields')
+        return undefined
+      }
+    }
+
+    console.error(`Loaded ${configs.length} external MCP server configuration(s)`)
+    return configs
+  } catch (error) {
+    console.warn('Failed to parse EXTERNAL_MCP_SERVERS environment variable:', error)
+    return undefined
+  }
+}
+
 // Main execution
 export async function main(args: string[] = process.argv.slice(2)) {
   const specPath = args[0]
@@ -60,8 +91,14 @@ export async function main(args: string[] = process.argv.slice(2)) {
   }
 
   const openApiSpec = await loadOpenApiSpec(specPath)
-  const proxy = new MCPProxy('OpenAPI Tools', openApiSpec)
-  
+  const externalServers = loadExternalMcpServers()
+
+  if (externalServers && externalServers.length > 0) {
+    console.error(`Initializing with ${externalServers.length} external MCP server(s)`)
+  }
+
+  const proxy = new MCPProxy('OpenAPI Tools', openApiSpec, externalServers)
+
   console.error('Connecting to Claude Desktop...')
   return proxy.connect(new StdioServerTransport())
 }

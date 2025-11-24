@@ -3,8 +3,11 @@
 [![smithery badge](https://smithery.ai/badge/openapi-mcp-server)](https://smithery.ai/server/openapi-mcp-server)
 
 > **Talk to any OpenAPI (v3.1) compliant API through Claude Desktop!**
+> **NEW: Connect to external MCP servers and bridge multiple tools together!**
 
 This tool creates a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that acts as a proxy for any API that has an OpenAPI v3.1 specification. This allows you to use Claude Desktop to easily interact with both local and remote server APIs.
+
+Additionally, this server can now act as an **MCP client** to connect to other external MCP servers, creating a powerful bridge that combines OpenAPI endpoints with external MCP tools in a single interface.
 
 If you're having trouble with Claude crashing or specs not working put them through our [spec cleaner app](https://open-api-spec-cleaner.replit.app/) this tidies up some open api schemas to help them be LLM-readable.
 
@@ -151,6 +154,8 @@ You can say:
 
 ## Getting Started
 
+### Basic Setup (OpenAPI Only)
+
 1. **Configure Claude Desktop:**
    Add this to your `claude_desktop_config.json`:
    ```json
@@ -165,6 +170,31 @@ You can say:
    ```
 
 2. **Restart Claude Desktop** and start interacting with your API!
+
+### Advanced Setup (With External MCP Servers)
+
+You can now configure the OpenAPI MCP Server to connect to external MCP servers, creating a unified interface:
+
+```json
+{
+  "mcpServers": {
+    "unified-api": {
+      "command": "npx",
+      "args": ["openapi-mcp-server", "/abs/path/to/openapi.json"],
+      "env": {
+        "EXTERNAL_MCP_SERVERS": "[{\"name\":\"web-search\",\"command\":\"npx\",\"args\":[\"-y\",\"@modelcontextprotocol/server-brave-search\"],\"env\":{\"BRAVE_API_KEY\":\"your-key\"}},{\"name\":\"filesystem\",\"command\":\"npx\",\"args\":[\"-y\",\"@modelcontextprotocol/server-filesystem\",\"/path/to/allowed/dir\"]}]"
+      }
+    }
+  }
+}
+```
+
+This configuration will expose:
+- All OpenAPI endpoints as MCP tools
+- All tools from the web-search MCP server (prefixed with `web-search__`)
+- All tools from the filesystem MCP server (prefixed with `filesystem__`)
+
+**Important**: External MCP tools are prefixed with their server name to avoid naming conflicts.
 
 ## Examples
 
@@ -235,7 +265,9 @@ pnpm build
 # Now restart claude desktop to run with latest changes
 ```
 
-## Using OpenAPIToMCPConverter Programmatically
+## Programmatic Usage
+
+### Using OpenAPIToMCPConverter
 
 If you want to convert OpenAPI specs to MCP tools programmatically, you can use the `OpenAPIToMCPConverter` class:
 
@@ -256,6 +288,70 @@ const { tools, openApiLookup } = converter.convertToMCPTools()
 ```
 
 The converter supports multiple tool formats, making it easy to integrate with different LLM providers. The converted tools maintain all the type information and descriptions from your OpenAPI spec, ensuring accurate parameter validation and helpful documentation.
+
+### Using MCPClientManager to Connect to External Servers
+
+You can use the `MCPClientManager` to connect to external MCP servers programmatically:
+
+```typescript
+import { MCPClientManager, MCPProxy } from 'openapi-mcp-server'
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+
+// Create MCP Proxy with external servers
+const proxy = new MCPProxy(
+  'my-api',
+  openApiSpec,
+  [
+    {
+      name: 'web-search',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-brave-search'],
+      env: { BRAVE_API_KEY: 'your-api-key' }
+    },
+    {
+      name: 'filesystem',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '/allowed/path']
+    }
+  ]
+)
+
+// Connect the proxy to stdio transport
+const transport = new StdioServerTransport()
+await proxy.connect(transport)
+
+// Now your MCP server exposes both OpenAPI tools AND external MCP tools!
+```
+
+### Using MCPClientManager Standalone
+
+You can also use the `MCPClientManager` directly without the proxy:
+
+```typescript
+import { MCPClientManager } from 'openapi-mcp-server'
+
+const manager = new MCPClientManager()
+
+// Add external MCP servers
+await manager.addServer({
+  name: 'web-search',
+  command: 'npx',
+  args: ['-y', '@modelcontextprotocol/server-brave-search'],
+  env: { BRAVE_API_KEY: 'your-api-key' }
+})
+
+// Get all available tools from external servers
+const tools = manager.getAllTools()
+
+// Call a tool on an external server
+const result = await manager.callTool('web-search__brave_web_search', {
+  query: 'latest news'
+})
+
+// Check connection status
+const status = manager.getStatus()
+console.log(status) // { 'web-search': true }
+```
 
 ## Making API Calls Programmatically
 

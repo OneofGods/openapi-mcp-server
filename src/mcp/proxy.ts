@@ -10,6 +10,7 @@ import { OpenAPIToMCPConverter } from '../openapi/parser'
 import { HttpClient, HttpClientError } from '../client/http-client'
 import { OpenAPIV3 } from 'openapi-types'
 import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
+import { MCPClientManager, MCPServerConfig } from '../client/mcp-client'
 
 
 type PathItemObject = OpenAPIV3.PathItemObject & {
@@ -34,10 +35,12 @@ export class MCPProxy {
   private httpClient: HttpClient
   private tools: Record<string, NewToolDefinition>
   private openApiLookup: Record<string, OpenAPIV3.OperationObject & { method: string, path: string }>
+  private mcpClientManager: MCPClientManager
 
   constructor(
     name: string,
     openApiSpec: OpenAPIV3.Document,
+    externalMcpServers?: MCPServerConfig[]
   ) {
     this.server = new Server(
       { name, version: '1.0.0' },
@@ -58,6 +61,16 @@ export class MCPProxy {
     this.tools = tools;
     this.openApiLookup = openApiLookup;
 
+    // Initialize MCP client manager for external servers
+    this.mcpClientManager = new MCPClientManager()
+
+    // Connect to external MCP servers if provided
+    if (externalMcpServers && externalMcpServers.length > 0) {
+      this.mcpClientManager.addServers(externalMcpServers).catch(error => {
+        console.error('Failed to connect to some external MCP servers:', error)
+      })
+    }
+
     this.setupHandlers()
   }
 
@@ -66,7 +79,7 @@ export class MCPProxy {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       const tools: Tool[] = [];
 
-      // Add methods as separate tools to match the MCP format
+      // Add OpenAPI methods as separate tools to match the MCP format
       Object.entries(this.tools).forEach(([toolName, def]) => {
         def.methods.forEach(method => {
           tools.push({
@@ -77,6 +90,12 @@ export class MCPProxy {
         });
       });
 
+      // Add external MCP server tools
+      const externalTools = this.mcpClientManager.getAllTools()
+      tools.push(...externalTools)
+
+      console.error(`Listing ${tools.length} total tools (${tools.length - externalTools.length} OpenAPI, ${externalTools.length} external MCP)`)
+
       return { tools };
     });
 
@@ -84,6 +103,30 @@ export class MCPProxy {
     this.server.setRequestHandler(CallToolRequestSchema, async request => {
       console.error('calling tool', request.params)
       const { name, arguments: params } = request.params
+
+      // Check if this is an external MCP tool
+      if (this.mcpClientManager.isExternalTool(name)) {
+        console.error(`Forwarding tool call to external MCP server: ${name}`)
+        try {
+          const response = await this.mcpClientManager.callTool(name, params)
+          // External MCP tools already return in the correct format
+          return response
+        } catch (error) {
+          console.error(`Error calling external MCP tool ${name}:`, error)
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  status: "error",
+                  message: error instanceof Error ? error.message : String(error)
+                })
+              }
+            ],
+            isError: true
+          }
+        }
+      }
 
       // Find the operation in OpenAPI spec
       const operation = this.findOperation(name)

@@ -1,3 +1,6 @@
 export { OpenAPIToMCPConverter } from './openapi/parser'
-export { HttpClient } from './client/http-client' 
+export { HttpClient } from './client/http-client'
+export { MCPClientManager, MCPClientConnection } from './client/mcp-client'
+export type { MCPServerConfig } from './client/mcp-client'
+export { MCPProxy } from './mcp/proxy'
 export type { OpenAPIV3, OpenAPIV3_1 } from 'openapi-types'
